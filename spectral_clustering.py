@@ -1,10 +1,22 @@
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import networkx as nx
 from scipy.spatial.distance import pdist, squareform
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
 import plotly.express as px
+import seaborn as sns
+import math
+
+PRESENTATION_COLORS = [
+    "#8C1C13",  # deep burgundy
+    "#F4D58D",  # muted gold
+    "#A44A3F",  # warm brick
+    "#6F5E76",  # desaturated violet
+    "#F0A202",  # amber accent
+    "#355070",  # slate blue for extras
+]
 
 
 class SpectralClusteringResult:
@@ -129,14 +141,13 @@ def get_similarity_matrix_from_distance_matrix(
         raise ValueError(
             "The 'sim_graph_type' argument should be one of the strings, 'fully_connect', 'eps_neighbor', 'knn', or 'mutual_knn'!"
         )
-
     return W
 
 
 def count_connected_components(W):
     """Return the number of connected components induced by ``W``.
-
-    Parameters
+            hue=labels.astype(str),
+            palette=palette_lookup,
     ----------
     W : ndarray
         Similarity (weight) matrix used to construct the adjacency graph.
@@ -407,24 +418,94 @@ def plot_3d_spectral_embedding(spectral_embedding, true_labels):
         y=spectral_embedding[:, 1],
         z=spectral_embedding[:, 2],
         color=true_labels.astype(str),  # color by true labels
-        title=f"{title} – Spectral Embedding (First 3 Eigenvectors)",
+        title="Spectral Embedding (First 3 Eigenvectors)",
     )
     fig.update_traces(marker=dict(size=3))
     fig.show()
 
 
-def plot_2d_spectral_embedding(spectral_embedding, true_labels):
-    plt.figure(figsize=(6, 5))
-    plt.scatter(
-        spectral_embedding[:, 0],
-        spectral_embedding[:, 1],
-        c=true_labels,
-        cmap="viridis",
-        s=20,
-        edgecolor="k",
+def plot_2d_spectral_embedding(spectral_embedding, true_labels, add_jitter=True):
+    """Render a 2D embedding plot that matches the presentation palette."""
+
+    sns.set_theme(style="white", context="talk")
+
+    embedding = np.asarray(spectral_embedding)
+    labels = np.asarray(true_labels)
+    unique_labels = np.unique(labels)
+
+    base_palette = sns.color_palette(PRESENTATION_COLORS)
+    repeats = math.ceil(len(unique_labels) / len(base_palette)) or 1
+    extended_palette = (base_palette * repeats)[: len(unique_labels)]
+    palette_lookup = {
+        str(lbl): extended_palette[idx] for idx, lbl in enumerate(unique_labels)
+    }
+
+    plot_x = embedding[:, 0].copy()
+    plot_y = embedding[:, 1].copy()
+
+    if add_jitter:
+        x_span = plot_x.max() - plot_x.min()
+        y_span = plot_y.max() - plot_y.min()
+        rng = np.random.RandomState(42)
+        plot_x += rng.normal(0, x_span * 0.02, size=plot_x.shape)
+        plot_y += rng.normal(0, y_span * 0.02, size=plot_y.shape)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    legend_labels = [str(lbl) for lbl in unique_labels]
+    sns.scatterplot(
+        x=plot_x,
+        y=plot_y,
+        hue=labels.astype(str),
+        palette=palette_lookup,
+        s=80,
+        linewidth=0.6,
+        edgecolor="black",
+        alpha=0.9,
+        ax=ax,
     )
-    plt.title("Spectral Embedding")
-    plt.xlabel("Eigenvector 1")
-    plt.ylabel("Eigenvector 2")
-    plt.tight_layout()
+
+    ax.set_title("Spectral Embedding", fontweight="bold", pad=15)
+    ax.set_xlabel("Eigenvector 1")
+    ax.set_ylabel("Eigenvector 2")
+    sns.despine(ax=ax, trim=False)
+    ax.grid(True, linestyle=":", alpha=0.3)
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor=palette_lookup[str(lbl)],
+            markeredgecolor="black",
+            markersize=9,
+        )
+        for lbl in unique_labels
+    ]
+
+    if legend_handles:
+        legend = ax.legend(
+            handles=legend_handles,
+            labels=legend_labels,
+            title="Cluster",
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1),
+            frameon=False,
+            borderpad=0.3,
+            labelspacing=0.4,
+        )
+        legend._legend_box.align = "left"
+
+    fig.tight_layout()
     plt.show()
+
+
+def diffusion_map(eigenvectors, eigenvalues, t=1):
+    eigenvalues_diff = 1 - eigenvalues
+
+    weighted_eigenvectors = eigenvectors * (eigenvalues_diff.reshape(1, -1) ** t)
+
+    kmeans_diffmap = KMeans(n_clusters=eigenvectors.shape[1], random_state=1, n_init=10)
+    y_pred_dmap = kmeans_diffmap.fit_predict(weighted_eigenvectors)
+
+    return y_pred_dmap
