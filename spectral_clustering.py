@@ -395,21 +395,32 @@ def plot_eigenvalues(eigenvalues_list, labels=None, n_first=10):
 
     # Create one subplot per spectrum
     fig, axes = plt.subplots(
-        1, n_graphs, figsize=(4.5 * n_graphs, 4), sharex=True, sharey=True
+        1, n_graphs, figsize=(5.5 * n_graphs, 4.5), sharex=True, sharey=True
     )
     if n_graphs == 1:
         axes = [axes]
 
     for ax, vals, title in zip(axes, spectra, labels):
-        # x-axis starts from 1 instead of 0
         x = np.arange(1, len(vals) + 1)
-        ax.plot(x, vals, marker="o")
-        ax.set_title(title)
-        ax.set_xlabel("Eigenvalue index")
-        ax.set_ylabel("log(|eigenvalue|)")
+        ax.plot(
+            x,
+            vals,
+            marker="o",
+            markersize=6,
+            linewidth=2,
+            color=PRESENTATION_COLORS[0],
+        )
+        ax.set_xlabel("Eigenvalue index", fontsize=11)
+        ax.set_ylabel("log(|eigenvalue|)", fontsize=11)
+        ax.set_xticks(np.arange(1, min(n_first, 10) + 1))
+        ax.set_xlim(1, 10)
+        ax.grid(False)
+        ax.tick_params(axis="both", colors="#444444", labelsize=10)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
 
     fig.suptitle("Log First Eigenvalues", fontsize=14)
-    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.tight_layout(rect=[0, 0.01, 1, 0.92])
 
 
 def plot_3d_spectral_embedding(spectral_embedding, true_labels):
@@ -424,21 +435,40 @@ def plot_3d_spectral_embedding(spectral_embedding, true_labels):
     fig.show()
 
 
-def plot_2d_spectral_embedding(spectral_embedding, true_labels, add_jitter=True):
-    """Render a 2D embedding plot that matches the presentation palette."""
+def plot_2d_spectral_embedding(
+    spectral_embedding, true_labels=None, cluster_labels=None, add_jitter=True
+):
+    """Render a 2D embedding plot that colors by clusters and (optionally) shapes by true labels."""
 
     sns.set_theme(style="white", context="talk")
 
     embedding = np.asarray(spectral_embedding)
-    labels = np.asarray(true_labels)
-    unique_labels = np.unique(labels)
+    if cluster_labels is None:
+        raise ValueError("cluster_labels must be provided to color the embedding.")
+
+    cluster_labels = np.asarray(cluster_labels)
+    unique_clusters = np.unique(cluster_labels)
+
+    label_array = None if true_labels is None else np.asarray(true_labels)
+    unique_labels = [] if label_array is None else np.unique(label_array)
 
     base_palette = sns.color_palette(PRESENTATION_COLORS)
-    repeats = math.ceil(len(unique_labels) / len(base_palette)) or 1
-    extended_palette = (base_palette * repeats)[: len(unique_labels)]
+    repeats = math.ceil(len(unique_clusters) / len(base_palette)) or 1
+    extended_palette = (base_palette * repeats)[: len(unique_clusters)]
     palette_lookup = {
-        str(lbl): extended_palette[idx] for idx, lbl in enumerate(unique_labels)
+        str(lbl): extended_palette[idx] for idx, lbl in enumerate(unique_clusters)
     }
+    color_array = np.array([palette_lookup[str(lbl)] for lbl in cluster_labels])
+
+    marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
+    marker_lookup = (
+        {}
+        if label_array is None
+        else {
+            str(lbl): marker_cycle[idx % len(marker_cycle)]
+            for idx, lbl in enumerate(unique_labels)
+        }
+    )
 
     plot_x = embedding[:, 0].copy()
     plot_y = embedding[:, 1].copy()
@@ -451,20 +481,34 @@ def plot_2d_spectral_embedding(spectral_embedding, true_labels, add_jitter=True)
         plot_y += rng.normal(0, y_span * 0.02, size=plot_y.shape)
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    legend_labels = [str(lbl) for lbl in unique_labels]
-    sns.scatterplot(
-        x=plot_x,
-        y=plot_y,
-        hue=labels.astype(str),
-        palette=palette_lookup,
-        s=80,
-        linewidth=0.6,
-        edgecolor="black",
-        alpha=0.9,
-        ax=ax,
-    )
+    if label_array is None:
+        ax.scatter(
+            plot_x,
+            plot_y,
+            c=color_array,
+            marker="o",
+            s=80,
+            linewidths=0.6,
+            edgecolor="black",
+            alpha=0.9,
+        )
+    else:
+        for lbl in unique_labels:
+            mask = label_array == lbl
+            if not np.any(mask):
+                continue
+            ax.scatter(
+                plot_x[mask],
+                plot_y[mask],
+                c=color_array[mask],
+                marker=marker_lookup[str(lbl)],
+                s=80,
+                linewidths=0.6,
+                edgecolor="black",
+                alpha=0.9,
+            )
 
-    ax.set_title("Spectral Embedding", fontweight="bold", pad=15)
+    ax.set_title("Spectral Embedding", pad=15)
     ax.set_xlabel("Eigenvector 1")
     ax.set_ylabel("Eigenvector 2")
     sns.despine(ax=ax, trim=False)
@@ -476,27 +520,54 @@ def plot_2d_spectral_embedding(spectral_embedding, true_labels, add_jitter=True)
             [0],
             marker="o",
             color="none",
-            markerfacecolor=palette_lookup[str(lbl)],
+            markerfacecolor=palette_lookup[str(cluster)],
             markeredgecolor="black",
             markersize=9,
+        )
+        for cluster in unique_clusters
+    ]
+
+    cluster_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=marker_lookup[str(lbl)],
+            color="black",
+            linestyle="",
+            markerfacecolor="none",
+            markersize=8,
         )
         for lbl in unique_labels
     ]
 
     if legend_handles:
-        legend = ax.legend(
+        cluster_legend = ax.legend(
             handles=legend_handles,
-            labels=legend_labels,
-            title="Cluster",
+            labels=[str(cluster) for cluster in unique_clusters],
+            title="Cluster Label",
             loc="upper left",
             bbox_to_anchor=(1.02, 1),
             frameon=False,
             borderpad=0.3,
             labelspacing=0.4,
         )
-        legend._legend_box.align = "left"
+        cluster_legend._legend_box.align = "left"
+        ax.add_artist(cluster_legend)
 
-    fig.tight_layout()
+    if cluster_handles:
+        true_legend = ax.legend(
+            handles=cluster_handles,
+            labels=[str(lbl) for lbl in unique_labels],
+            title="True Label",
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.25),
+            frameon=False,
+            borderpad=0.3,
+            labelspacing=0.4,
+        )
+        true_legend._legend_box.align = "left"
+
+    fig.tight_layout(rect=[0, 0, 0.78, 1])
     plt.show()
 
 

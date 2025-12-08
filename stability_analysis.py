@@ -206,7 +206,6 @@ def cross_validation_stability_test(
     K_folds=5,
     K_clusters=4,
     random_state=19,
-    test_size=0.20,
     info_score=normalized_mutual_info_score,
 ):
     """Evaluate spectral clustering stability via stratified K-fold splits.
@@ -221,8 +220,6 @@ def cross_validation_stability_test(
         Number of clusters to request from :func:`Spectral_Clustering`.
     random_state : int, default=19
         Seed for the ``StratifiedKFold`` shuffling as well as per-fold clustering.
-    test_size : float, default=0.20
-        Reserved for API compatibility; not used directly in the current routine.
     info_score : callable, default=normalized_mutual_info_score
         Function applied to compare the per-fold labels with the reference
         partition. Larger values indicate closer agreement.
