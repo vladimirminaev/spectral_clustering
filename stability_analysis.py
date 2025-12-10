@@ -202,9 +202,9 @@ def run_experiment(
 
 
 def cross_validation_stability_test(
-    similarity_matrix,
+    distance_matrix,
+    params,
     K_folds=5,
-    K_clusters=4,
     random_state=19,
     info_score=normalized_mutual_info_score,
 ):
@@ -232,16 +232,25 @@ def cross_validation_stability_test(
     """
 
     if (
-        similarity_matrix.ndim != 2
-        or similarity_matrix.shape[0] != similarity_matrix.shape[1]
+        distance_matrix.ndim != 2
+        or distance_matrix.shape[0] != distance_matrix.shape[1]
     ):
         raise ValueError("similarity_matrix must be a square matrix")
     if K_folds < 2:
         raise ValueError("K_folds must be at least 2")
 
+    similarity_matrix = get_similarity_matrix_from_distance_matrix(
+        distance_matrix,
+        sim_graph_type=params["sim_graph_type"],
+        knn=params["knn"],
+        mutual_knn=params["mutual_knn"],
+        sigma=params["sigma"],
+        epsilon=params["epsilon"],
+    )
+
     full_result = Spectral_Clustering(
         similarity_matrix,
-        K=K_clusters,
+        K=params["K"],
         random_state=random_state,
     )
     reference_labels = full_result.labels
@@ -259,18 +268,27 @@ def cross_validation_stability_test(
     for fold_idx, (train_idx, test_idx) in enumerate(
         skf.split(dummy_features, reference_labels), start=1
     ):
-        train_matrix = similarity_matrix[np.ix_(test_idx, test_idx)]
+        train_dist_matrix = distance_matrix[np.ix_(train_idx, train_idx)]
+
+        train_matrix = get_similarity_matrix_from_distance_matrix(
+            train_dist_matrix,
+            sim_graph_type=params["sim_graph_type"],
+            knn=params["knn"],
+            mutual_knn=params["mutual_knn"],
+            sigma=params["sigma"],
+            epsilon=params["epsilon"],
+        )
 
         fold_result = Spectral_Clustering(
             train_matrix,
-            K=K_clusters,
+            K=params["K"],
             random_state=random_state + fold_idx,
         )
         fold_labels = fold_result.labels
 
         print("Labels shape: ", fold_labels.shape)
 
-        score = float(info_score(reference_labels[test_idx], fold_labels))
+        score = float(info_score(reference_labels[train_idx], fold_labels))
         fold_scores.append(score)
         print(f"Fold {fold_idx}: info_score(train vs full) = {score:.4f}")
 
@@ -313,3 +331,115 @@ def analyse_soft_spectral_clustering_stability(result):
         mean_entropy = np.mean(entropy_per_point)
 
     return mean_entropy
+
+
+def drop_data_stability_test(
+    distance_matrix,
+    params,
+    n_runs=20,
+    alpha=0.2,
+    random_state=19,
+    info_score=normalized_mutual_info_score,
+):
+    """Evaluate stability by repeatedly dropping a fraction of samples.
+
+    Each run removes ``alpha`` proportion of samples at random, fits spectral
+    clustering on the remaining data, and compares the resulting labels to the
+    reference partition obtained from the full dataset.
+
+    Parameters
+    ----------
+    distance_matrix : ndarray
+        Pairwise distance matrix for the full dataset (square).
+    params : dict
+        Graph-construction parameters (``sim_graph_type``, ``knn``, etc.) and the
+        desired number of clusters ``K``.
+    n_runs : int, default=20
+        Number of random subsampling experiments to perform.
+    alpha : float, default=0.2
+        Fraction of samples to drop on each run. Must satisfy ``0 <= alpha < 1``.
+    random_state : int, default=19
+        Seed controlling the random subsampling and clustering randomness.
+    info_score : callable, default=normalized_mutual_info_score
+        Scoring function comparing the reference labels with run-specific labels.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the reference labels, per-run scores, and their
+        mean/std summary.
+    """
+
+    if (
+        distance_matrix.ndim != 2
+        or distance_matrix.shape[0] != distance_matrix.shape[1]
+    ):
+        raise ValueError("distance_matrix must be a square matrix")
+    if not (0 <= alpha < 1):
+        raise ValueError("alpha must be in the [0, 1) interval")
+    if n_runs < 1:
+        raise ValueError("n_runs must be at least 1")
+
+    similarity_matrix = get_similarity_matrix_from_distance_matrix(
+        distance_matrix,
+        sim_graph_type=params["sim_graph_type"],
+        knn=params["knn"],
+        mutual_knn=params["mutual_knn"],
+        sigma=params["sigma"],
+        epsilon=params["epsilon"],
+    )
+
+    full_result = Spectral_Clustering(
+        similarity_matrix,
+        K=params["K"],
+        random_state=random_state,
+    )
+    reference_labels = full_result.labels
+
+    n_samples = distance_matrix.shape[0]
+    rng = np.random.RandomState(random_state)
+    keep_size = max(params["K"], int(round((1 - alpha) * n_samples)))
+    keep_size = min(n_samples, keep_size)
+    if keep_size <= 0:
+        raise ValueError("alpha is too large; no samples would remain.")
+
+    fold_scores = []
+
+    for run_idx in range(1, n_runs + 1):
+        keep_idx = np.sort(rng.choice(n_samples, size=keep_size, replace=True))
+
+        train_dist_matrix = distance_matrix[np.ix_(keep_idx, keep_idx)]
+        train_matrix = get_similarity_matrix_from_distance_matrix(
+            train_dist_matrix,
+            sim_graph_type=params["sim_graph_type"],
+            knn=params["knn"],
+            mutual_knn=params["mutual_knn"],
+            sigma=params["sigma"],
+            epsilon=params["epsilon"],
+        )
+
+        run_result = Spectral_Clustering(
+            train_matrix,
+            K=params["K"],
+            random_state=random_state + run_idx,
+        )
+        run_labels = run_result.labels
+
+        score = float(info_score(reference_labels[keep_idx], run_labels))
+        fold_scores.append(score)
+        print(
+            f"Run {run_idx}: kept {keep_size}/{n_samples} samples, info_score = {score:.4f}"
+        )
+
+    mean_score = float(np.mean(fold_scores)) if fold_scores else float("nan")
+    std_score = float(np.std(fold_scores)) if fold_scores else float("nan")
+
+    print(f"Mean info_score: {mean_score:.4f}")
+    print(f"Std  info_score: {std_score:.4f}")
+
+    return {
+        "reference_labels": reference_labels,
+        "fold_scores": fold_scores,
+        "mean_score": mean_score,
+        "std_score": std_score,
+    }
