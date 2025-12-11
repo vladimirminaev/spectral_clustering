@@ -1,5 +1,9 @@
 import numpy as np
-from sklearn.metrics import normalized_mutual_info_score, adjusted_mutual_info_score, adjusted_rand_score
+from sklearn.metrics import (
+    normalized_mutual_info_score,
+    adjusted_mutual_info_score,
+    adjusted_rand_score,
+)
 from sklearn.model_selection import ParameterGrid
 
 from spectral_clustering import *
@@ -52,8 +56,8 @@ def find_best_params_with_eigengap_grid_search(
 
         eigengap = get_eigengap(result.eigenvalues)
 
-        print(params)
-        print("Eigengap: ", eigengap)
+        # print(params)
+        # print("Eigengap: ", eigengap)
 
         if eigengap > best_gap:
             best_gap = eigengap
@@ -68,17 +72,18 @@ def find_best_params_with_eigengap_grid_search(
                     random_state=random_state,
                 )
                 best_params["K"] = estimated_k
-                print("Average eigenvalue: ", np.mean(result.eigenvalues[:estimated_k]))
-                print("Estimated K: ", estimated_k)
+                # print("Average eigenvalue: ", np.mean(result.eigenvalues[:estimated_k]))
+                # print("Estimated K: ", estimated_k)
 
             except ValueError as exc:
                 if "connected components" in str(exc).lower():
                     continue
                 raise
 
-        print()
+        # print()
 
     return best_params
+
 
 # NMI
 def find_best_params_with_seed_iteration_nmi(
@@ -172,6 +177,7 @@ def find_best_params_with_seed_iteration_nmi(
 
     return best_params
 
+
 # AMI
 def find_best_params_with_seed_iteration_ami(
     distance_matrix,
@@ -263,6 +269,7 @@ def find_best_params_with_seed_iteration_ami(
             best_params = params.copy()
 
     return best_params
+
 
 # ARS
 def find_best_params_with_seed_iteration_ars(

@@ -1,7 +1,10 @@
 import numpy as np
+import pandas as pd
 from scipy.optimize import linear_sum_assignment
 from sklearn.metrics import confusion_matrix, normalized_mutual_info_score
 from sklearn.model_selection import StratifiedKFold
+import seaborn as sns
+from spectral_clustering import *
 
 from spectral_clustering import (
     Spectral_Clustering,
@@ -204,7 +207,7 @@ def run_experiment(
 def cross_validation_stability_test(
     distance_matrix,
     params,
-    K_folds=5,
+    K_folds=10,
     random_state=19,
     info_score=normalized_mutual_info_score,
 ):
@@ -443,3 +446,103 @@ def drop_data_stability_test(
         "mean_score": mean_score,
         "std_score": std_score,
     }
+
+
+def plot_cross_validation_stability_test_result(
+    stability_res_ami,
+    stability_res_ars,
+    metric_names=("AMI", "ARS"),
+    palette=None,
+    ax=None,
+):
+    """Visualize two cross-validation stability test outputs side by side."""
+
+    if len(metric_names) != 2:
+        raise ValueError("metric_names must provide exactly two labels")
+
+    fold_scores_a = np.asarray(stability_res_ami["fold_scores"], dtype=float)
+    fold_scores_b = np.asarray(stability_res_ars["fold_scores"], dtype=float)
+
+    comparison_df = pd.DataFrame(
+        {
+            "Fold": np.tile(np.arange(1, fold_scores_a.size + 1), 2),
+            "Score": np.concatenate([fold_scores_a, fold_scores_b]),
+            "Metric": [metric_names[0]] * fold_scores_a.size
+            + [metric_names[1]] * fold_scores_b.size,
+        }
+    )
+
+    if palette is None:
+        palette = {
+            metric_names[0]: PRESENTATION_COLORS[0],
+            metric_names[1]: PRESENTATION_COLORS[3],
+        }
+
+    sns.set_theme(style="whitegrid", context="talk")
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 5))
+    else:
+        fig = ax.figure
+
+    sns.barplot(
+        data=comparison_df,
+        x="Fold",
+        y="Score",
+        hue="Metric",
+        palette=palette,
+        edgecolor="black",
+        linewidth=0.4,
+        ax=ax,
+        dodge=True,
+        alpha=0.9,
+    )
+
+    ax.set_ylim(0.0, 1.05)
+    ax.set_ylabel("Stability Score")
+    ax.set_title("Stability Across Folds")
+    ax.legend(bbox_to_anchor=(1.02, 0.5), frameon=False)
+
+    mean_a = fold_scores_a.mean()
+    mean_b = fold_scores_b.mean()
+
+    ax.axhline(
+        mean_a,
+        color=palette[metric_names[0]],
+        linestyle="--",
+        linewidth=1.2,
+        alpha=0.8,
+    )
+    ax.axhline(
+        mean_b,
+        color=palette[metric_names[1]],
+        linestyle=":",
+        linewidth=1.2,
+        alpha=0.8,
+    )
+
+    label_x = comparison_df["Fold"].max() + 1.2
+
+    ax.text(
+        label_x,
+        mean_a - 0.04,
+        f"{metric_names[0]} mean = {mean_a:.2f}",
+        color=palette[metric_names[0]],
+        va="bottom",
+        ha="right",
+        fontsize=10,
+        fontweight="semibold",
+    )
+    ax.text(
+        label_x,
+        mean_b + 0.04,
+        f"{metric_names[1]} mean = {mean_b:.2f}",
+        color=palette[metric_names[1]],
+        va="top",
+        ha="right",
+        fontsize=10,
+        fontweight="semibold",
+    )
+
+    sns.despine(trim=True)
+    fig.tight_layout()
+    return ax
