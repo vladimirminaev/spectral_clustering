@@ -8,6 +8,7 @@ from sklearn.mixture import GaussianMixture
 import plotly.graph_objects as go
 import seaborn as sns
 import math
+import pandas as pd
 
 PRESENTATION_COLORS = [
     "#8C1C13",  # deep burgundy
@@ -22,7 +23,18 @@ PRESENTATION_COLORS = [
 class SpectralClusteringResult:
     """Encapsulate spectral clustering outputs and provide convenience accessors."""
 
-    def __init__(self, clustering_model, eigenvectors, eigenvalues, labels, probs=None):
+    def __init__(
+        self,
+        clustering_model,
+        eigenvectors,
+        eigenvalues,
+        labels,
+        probs=None,
+        K=None,
+        normalized=None,
+        random_state=None,
+        soft=None,
+    ):
         self.clustering_model = clustering_model
         self.eigenvectors = np.asarray(eigenvectors)
         self.eigenvalues = np.asarray(eigenvalues)
@@ -255,6 +267,10 @@ def Spectral_Clustering(W, K=8, normalized=1, random_state=1, soft=False):
         eigenvalues=eigenvalues_sorted,
         labels=labels,
         probs=probs,
+        K=K,
+        normalized=normalized,
+        random_state=random_state,
+        soft=soft,
     )
 
 
@@ -420,16 +436,17 @@ def plot_eigenvalues(eigenvalues_list, labels=None, n_first=10):
             linewidth=2,
             color=PRESENTATION_COLORS[0],
         )
-        ax.set_xlabel("Eigenvalue index", fontsize=11)
-        ax.set_ylabel("log(|eigenvalue|)", fontsize=11)
+        ax.set_xlabel("Eigenvalue index", fontsize=18)
+        ax.set_ylabel("log(|eigenvalue|)", fontsize=18)
         ax.set_xticks(np.arange(1, n_first + 1))
         ax.set_xlim(1, n_first)
         ax.grid(False)
-        ax.tick_params(axis="both", colors="#444444", labelsize=10)
+        ax.tick_params(axis="both", colors="#444444", labelsize=15)
         for spine in ax.spines.values():
             spine.set_visible(False)
+        ax.set_title(title, fontsize=18, color="#333333")
 
-    fig.suptitle("Log First Eigenvalues", fontsize=14)
+    fig.suptitle("Log First Eigenvalues", fontsize=20)
     fig.tight_layout(rect=[0, 0.01, 1, 0.92])
 
 
@@ -577,21 +594,24 @@ def plot_3d_spectral_embedding(
         )
 
     fig.update_layout(
-        title="Spectral Embedding (Interactive 3D)",
+        title="Spectral Embedding",
         scene=dict(
+            domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
             xaxis_title="Eigenvector 1",
             yaxis_title="Eigenvector 2",
             zaxis_title="Eigenvector 3",
         ),
         legend=dict(
             orientation="v",
-            x=1.02,
-            y=1.0,
+            x=0.99,
+            y=0.99,
+            xanchor="right",
+            yanchor="top",
             bgcolor="rgba(255,255,255,0.7)",
             bordercolor="rgba(0,0,0,0.1)",
             itemsizing="constant",
         ),
-        margin=dict(l=0, r=0, b=0, t=50),
+        margin=dict(l=0, r=0, b=0, t=40),
     )
 
     fig.show()
@@ -642,15 +662,15 @@ def plot_2d_spectral_embedding(
         plot_x += rng.normal(0, x_span * 0.02, size=plot_x.shape)
         plot_y += rng.normal(0, y_span * 0.02, size=plot_y.shape)
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(5.5, 4.2))
     if label_array is None:
         ax.scatter(
             plot_x,
             plot_y,
             c=color_array,
             marker="o",
-            s=80,
-            linewidths=0.6,
+            s=55,
+            linewidths=0.4,
             edgecolor="black",
             alpha=0.9,
         )
@@ -664,17 +684,18 @@ def plot_2d_spectral_embedding(
                 plot_y[mask],
                 c=color_array[mask],
                 marker=marker_lookup[str(lbl)],
-                s=80,
-                linewidths=0.6,
+                s=55,
+                linewidths=0.4,
                 edgecolor="black",
                 alpha=0.9,
             )
 
-    ax.set_title("Spectral Embedding", pad=15)
-    ax.set_xlabel("Eigenvector 1")
-    ax.set_ylabel("Eigenvector 2")
+    ax.set_title("Spectral Embedding", pad=10, fontsize=11)
+    ax.set_xlabel("Eigenvector 1", fontsize=9)
+    ax.set_ylabel("Eigenvector 2", fontsize=9)
     sns.despine(ax=ax, trim=False)
     ax.grid(True, linestyle=":", alpha=0.3)
+    ax.tick_params(axis="both", labelsize=8)
 
     legend_handles = [
         Line2D(
@@ -684,7 +705,7 @@ def plot_2d_spectral_embedding(
             color="none",
             markerfacecolor=palette_lookup[str(cluster)],
             markeredgecolor="black",
-            markersize=9,
+            markersize=6.5,
         )
         for cluster in unique_clusters
     ]
@@ -697,7 +718,7 @@ def plot_2d_spectral_embedding(
             color="black",
             linestyle="",
             markerfacecolor="none",
-            markersize=8,
+            markersize=6,
         )
         for lbl in unique_labels
     ]
@@ -708,7 +729,7 @@ def plot_2d_spectral_embedding(
             labels=[str(cluster) for cluster in unique_clusters],
             title="Cluster Label",
             loc="upper left",
-            bbox_to_anchor=(1.02, 1),
+            bbox_to_anchor=(1.01, 1),
             frameon=False,
             borderpad=0.3,
             labelspacing=0.4,
@@ -722,7 +743,7 @@ def plot_2d_spectral_embedding(
             labels=[str(lbl) for lbl in unique_labels],
             title="True Label",
             loc="upper left",
-            bbox_to_anchor=(1.02, 0.25),
+            bbox_to_anchor=(1.01, 0.25),
             frameon=False,
             borderpad=0.3,
             labelspacing=0.4,
@@ -742,3 +763,64 @@ def diffusion_map(eigenvectors, eigenvalues, t=1):
     y_pred_dmap = kmeans_diffmap.fit_predict(weighted_eigenvectors)
 
     return y_pred_dmap
+
+
+def plot_label_distribution(*label_sets, titles=None, palette=None, figsize=None):
+    if not label_sets:
+        raise ValueError("Provide at least one label array.")
+
+    n_plots = len(label_sets)
+
+    if titles is None:
+        titles = [f"Distribution {idx + 1}" for idx in range(n_plots)]
+    elif isinstance(titles, str):
+        titles = [titles]
+    if len(titles) != n_plots:
+        raise ValueError("'titles' length must match the number of label arrays.")
+
+    if palette is None:
+        palette = PRESENTATION_COLORS
+    if not isinstance(palette, (list, tuple)):
+        palette = [palette]
+
+    if figsize is None:
+        figsize = (5.5 * n_plots, 4)
+
+    fig, axes = plt.subplots(1, n_plots, figsize=figsize)
+    if n_plots == 1:
+        axes = [axes]
+
+    counts_list = []
+    for idx, (labels, ax, title) in enumerate(zip(label_sets, axes, titles)):
+        labels = np.asarray(labels)
+        counts = (
+            pd.Series(labels)
+            .value_counts()
+            .sort_index()
+            .rename("count")
+            .reset_index()
+            .rename(columns={"index": "cluster"})
+        )
+
+        total = counts["count"].sum()
+        total = total if total > 0 else 1
+        counts["percentage"] = counts["count"] / total * 100.0
+
+        color = palette[idx % len(palette)]
+        ax.bar(
+            counts["cluster"].astype(str),
+            counts["percentage"],
+            color=color,
+            edgecolor="black",
+        )
+        ax.set_xlabel("Cluster label")
+        ax.set_ylabel("Percentage")
+        ax.set_ylim(0, 100)
+        ax.set_title(title)
+        ax.grid(True, axis="y", linestyle=":", alpha=0.3)
+        counts_list.append(counts)
+
+    fig.tight_layout()
+    plt.show()
+
+    return counts_list if n_plots > 1 else counts_list[0]

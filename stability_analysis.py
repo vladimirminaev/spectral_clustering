@@ -471,6 +471,7 @@ def plot_cross_validation_stability_test_result(
             + [metric_names[1]] * fold_scores_b.size,
         }
     )
+    n_folds = int(comparison_df["Fold"].max()) if not comparison_df.empty else 0
 
     if palette is None:
         palette = {
@@ -478,9 +479,9 @@ def plot_cross_validation_stability_test_result(
             metric_names[1]: PRESENTATION_COLORS[3],
         }
 
-    sns.set_theme(style="whitegrid", context="talk")
+    sns.set_theme(style="whitegrid", context="notebook")
     if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 5))
+        fig, ax = plt.subplots(figsize=(7.2, 3.2))
     else:
         fig = ax.figure
 
@@ -491,11 +492,17 @@ def plot_cross_validation_stability_test_result(
         hue="Metric",
         palette=palette,
         edgecolor="black",
-        linewidth=0.4,
+        linewidth=0.3,
         ax=ax,
         dodge=True,
         alpha=0.9,
+        width=0.7,
     )
+
+    # Reduce wasted horizontal padding so bars use the available width.
+    ax.margins(x=0.01)
+    if n_folds > 0:
+        ax.set_xlim(-0.5, n_folds - 0.5)
 
     ax.set_ylim(0.0, 1.05)
     ax.set_ylabel("Stability Score")
@@ -520,29 +527,37 @@ def plot_cross_validation_stability_test_result(
         alpha=0.8,
     )
 
-    label_x = comparison_df["Fold"].max() + 1.2
-
+    # Place mean labels just outside the plotting area so they never overlap the
+    # last bars and remain separated even when means are close.
+    text_x = 1.02
     ax.text(
-        label_x,
-        mean_a - 0.04,
+        text_x,
+        0.98,
         f"{metric_names[0]} mean = {mean_a:.2f}",
+        transform=ax.transAxes,
         color=palette[metric_names[0]],
-        va="bottom",
-        ha="right",
-        fontsize=10,
+        va="top",
+        ha="left",
+        fontsize=9,
         fontweight="semibold",
+        clip_on=False,
     )
     ax.text(
-        label_x,
-        mean_b + 0.04,
+        text_x,
+        0.92,
         f"{metric_names[1]} mean = {mean_b:.2f}",
+        transform=ax.transAxes,
         color=palette[metric_names[1]],
         va="top",
-        ha="right",
-        fontsize=10,
+        ha="left",
+        fontsize=9,
         fontweight="semibold",
+        clip_on=False,
     )
 
     sns.despine(trim=True)
-    fig.tight_layout()
+    if ax is None:
+        fig.tight_layout(rect=(0, 0, 0.82, 1))
+    else:
+        fig.tight_layout()
     return ax
