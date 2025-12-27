@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import linear_sum_assignment
-from sklearn.metrics import confusion_matrix, normalized_mutual_info_score
+from sklearn.metrics import confusion_matrix, normalized_mutual_info_score, adjusted_mutual_info_score, adjusted_rand_score
 from sklearn.model_selection import StratifiedKFold
 import seaborn as sns
 from spectral_clustering import *
@@ -49,7 +49,6 @@ def match_labels(y_true, y_pred):
 
     return cm_matched, y_pred_matched
 
-
 def perturb_data(X, noise_std, rng=None):
     """Return a perturbed copy of ``X`` by adding Gaussian noise.
 
@@ -69,9 +68,8 @@ def perturb_data(X, noise_std, rng=None):
         Noisy data with the same shape as ``X``.
     """
     if rng is None:
-        rng = np.random.RandomState(random_state)
+        rng = np.random.RandomState(rng)
     return X + rng.normal(loc=0.0, scale=noise_std, size=X.shape)
-
 
 def run_single_clustering_on_perturbation(
     X, y_true, noise_std, best_params, K=2, rng=None, random_state=1
@@ -130,7 +128,6 @@ def run_single_clustering_on_perturbation(
         "eigenvalues": result.eigenvalues,
         "eigenvectors": result.eigenvectors,
     }
-
 
 def run_experiment(
     X,
@@ -202,7 +199,6 @@ def run_experiment(
     if return_all:
         return results
     return {"results": results, "accuracy": accuracy}
-
 
 def cross_validation_stability_test(
     distance_matrix,
@@ -307,7 +303,6 @@ def cross_validation_stability_test(
         "mean_score": mean_score,
         "std_score": std_score,
     }
-
 
 def analyse_soft_spectral_clustering_stability(result):
     """Compute the mean posterior entropy for a clustering result.
