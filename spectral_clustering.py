@@ -5,8 +5,6 @@ import networkx as nx
 from scipy.spatial.distance import pdist, squareform
 from sklearn.cluster import KMeans
 from sklearn.mixture import GaussianMixture
-import plotly.graph_objects as go
-import seaborn as sns
 import math
 import pandas as pd
 
@@ -419,14 +417,57 @@ def plot_eigenvalues(eigenvalues_list, labels=None, n_first=10):
         vals = np.log(np.abs(eigs[:k]))
         spectra.append(vals)
 
-    # Create one subplot per spectrum
-    fig, axes = plt.subplots(
-        1, n_graphs, figsize=(5.5 * n_graphs, 4.5), sharex=True, sharey=True
-    )
-    if n_graphs == 1:
-        axes = [axes]
+    # Create a compact grid so figures don't become ultra-wide (which forces
+    # notebooks to downscale and makes each subplot tiny).
+    if n_graphs <= 3:
+        n_rows, n_cols = 1, n_graphs
+    else:
+        n_cols = 3
+        n_rows = int(math.ceil(n_graphs / n_cols))
 
-    for ax, vals, title in zip(axes, spectra, labels):
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(5.0 * n_cols, 3.9 * n_rows),
+        sharex=True,
+        sharey=True,
+        constrained_layout=False,
+    )
+
+    axes = np.atleast_1d(axes).ravel()
+
+    # For incomplete last rows (e.g., 5 plots on a 2x3 grid), the x-label should
+    # appear on the bottom-most *existing* axis of each column.
+    last_row_per_col = [0] * n_cols
+    for col_idx in range(n_cols):
+        if col_idx >= n_graphs:
+            last_row_per_col[col_idx] = -1
+            continue
+        last_row_per_col[col_idx] = (n_graphs - 1 - col_idx) // n_cols
+
+    for ax_idx, ax in enumerate(axes):
+        if ax_idx >= n_graphs:
+            # Keep the bottom-most *empty* axis of a column visible so the
+            # x-axis label also appears for columns that have no subplot in the
+            # last row (e.g., 5 plots on a 2x3 grid).
+            row_idx = ax_idx // n_cols
+            col_idx = ax_idx % n_cols
+            if row_idx == n_rows - 1 and last_row_per_col[col_idx] >= 0:
+                ax.set_xticks([])
+                ax.set_yticks([])
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
+                ax.tick_params(left=False, bottom=False)
+                ax.set_ylabel("")
+                ax.set_title("")
+                ax.set_xlabel("Eigenvalue index", fontsize=12)
+                ax.grid(False)
+            else:
+                ax.set_visible(False)
+            continue
+
+        vals = spectra[ax_idx]
+        title = labels[ax_idx]
         x = np.arange(1, len(vals) + 1)
         ax.plot(
             x,
@@ -436,18 +477,22 @@ def plot_eigenvalues(eigenvalues_list, labels=None, n_first=10):
             linewidth=2,
             color=PRESENTATION_COLORS[0],
         )
-        ax.set_xlabel("Eigenvalue index", fontsize=18)
-        ax.set_ylabel("log(|eigenvalue|)", fontsize=18)
+        row_idx = ax_idx // n_cols
+        col_idx = ax_idx % n_cols
+        if n_rows == 1 or row_idx == last_row_per_col[col_idx]:
+            ax.set_xlabel("Eigenvalue index", fontsize=12)
+        if n_cols == 1 or col_idx == 0:
+            ax.set_ylabel("log(|eigenvalue|)", fontsize=12)
         ax.set_xticks(np.arange(1, n_first + 1))
         ax.set_xlim(1, n_first)
         ax.grid(False)
-        ax.tick_params(axis="both", colors="#444444", labelsize=15)
+        ax.tick_params(axis="both", colors="#444444", labelsize=12)
         for spine in ax.spines.values():
             spine.set_visible(False)
-        ax.set_title(title, fontsize=18, color="#333333")
+        ax.set_title(title, fontsize=14, color="#333333")
 
-    fig.suptitle("Log First Eigenvalues", fontsize=20)
-    fig.tight_layout(rect=[0, 0.01, 1, 0.92])
+    fig.suptitle("Log First Eigenvalues", fontsize=16, y=0.98)
+    fig.tight_layout(rect=[0.02, 0.04, 1, 0.94])
 
 
 def plot_3d_spectral_embedding(
@@ -455,24 +500,252 @@ def plot_3d_spectral_embedding(
     true_labels=None,
     cluster_labels=None,
     add_jitter=True,
+    title="Spectral Embedding",
+    figsize=(6.2, 4.6),
+    elev=18,
+    azim=35,
+    marker_size=36,
+    alpha=0.9,
+    legend=True,
+    savepath=None,
+    dpi=300,
+    show=True,
 ):
-    """Interactive 3D embedding plot with cluster colors and optional true-label shapes."""
+    """Slide-friendly static 3D embedding plot.
+
+    Uses Matplotlib (not Plotly) to produce a crisp, exportable figure.
+
+    Parameters
+    ----------
+    spectral_embedding : array-like
+        Embedding coordinates with at least 3 columns.
+    true_labels : array-like, optional
+        Optional ground-truth labels. When provided, points are additionally
+        distinguished by marker shape.
+    cluster_labels : array-like
+        Cluster assignments used for coloring.
+    add_jitter : bool, default=True
+        Adds a small deterministic jitter to reduce overplotting.
+    title : str, default="Spectral Embedding"
+        Figure title.
+    figsize : tuple, default=(6.2, 4.6)
+        Figure size in inches.
+    elev, azim : float
+        View angles for the 3D camera.
+    marker_size : float
+        Scatter marker area.
+    alpha : float
+        Marker opacity.
+    legend : bool
+        Whether to draw legends.
+    savepath : str | None
+        If provided, saves the figure to this path.
+    dpi : int
+        DPI for saving.
+    show : bool
+        If True, calls ``plt.show()``.
+
+    Returns
+    -------
+    (fig, ax)
+        Matplotlib figure and 3D axes.
+    """
 
     if cluster_labels is None:
         raise ValueError("cluster_labels must be provided to color the embedding.")
 
     embedding = np.asarray(spectral_embedding)
-    if embedding.shape[1] < 3:
-        raise ValueError("spectral_embedding must provide at least three dimensions.")
+    if embedding.ndim != 2 or embedding.shape[1] < 3:
+        raise ValueError("spectral_embedding must be a 2D array with >= 3 columns.")
 
     coords = embedding[:, :3].astype(float).copy()
+    cluster_labels = np.asarray(cluster_labels)
+    if cluster_labels.shape[0] != coords.shape[0]:
+        raise ValueError(
+            "cluster_labels must have the same length as spectral_embedding."
+        )
+
+    unique_clusters = np.unique(cluster_labels)
+    label_array = None if true_labels is None else np.asarray(true_labels)
+    if label_array is not None and label_array.shape[0] != coords.shape[0]:
+        raise ValueError("true_labels must have the same length as spectral_embedding.")
+
+    if add_jitter:
+        spans = coords.max(axis=0) - coords.min(axis=0)
+        spans[spans == 0] = 1.0
+        rng = np.random.RandomState(42)
+        coords += rng.normal(0, spans * 0.02, size=coords.shape)
+
+    base_palette = list(PRESENTATION_COLORS)
+    repeats = max(1, math.ceil(len(unique_clusters) / len(base_palette)))
+    extended_palette = (base_palette * repeats)[: len(unique_clusters)]
+    palette_lookup = {
+        cluster: extended_palette[i] for i, cluster in enumerate(unique_clusters)
+    }
+
+    # Improve contrast for the common case of clusters labeled 0/1/2:
+    # cluster "2" can be too close to the burgundy "0", so assign a distinct
+    # palette color (slate blue).
+    if 2 in palette_lookup:
+        palette_lookup[2] = PRESENTATION_COLORS[5]
+    elif "2" in palette_lookup:
+        palette_lookup["2"] = PRESENTATION_COLORS[5]
+
+    if label_array is None:
+        marker_lookup = None
+        legend_true_handles = []
+        legend_true_labels = []
+    else:
+        unique_labels = np.unique(label_array)
+        marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
+        marker_lookup = {
+            lbl: marker_cycle[idx % len(marker_cycle)]
+            for idx, lbl in enumerate(unique_labels)
+        }
+        legend_true_handles = [
+            Line2D(
+                [0],
+                [0],
+                marker=marker_lookup[lbl],
+                color="black",
+                linestyle="",
+                markerfacecolor="none",
+                markeredgecolor="black",
+                markersize=6,
+            )
+            for lbl in unique_labels
+        ]
+        legend_true_labels = [str(lbl) for lbl in unique_labels]
+
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111, projection="3d")
+
+    # Draw points (grouped for marker-shape control)
+    if label_array is None:
+        point_markers = ["o"]
+        point_masks = [np.ones(coords.shape[0], dtype=bool)]
+        point_labels = [None]
+    else:
+        point_markers = []
+        point_masks = []
+        point_labels = []
+        for lbl, marker in marker_lookup.items():
+            mask = label_array == lbl
+            if np.any(mask):
+                point_markers.append(marker)
+                point_masks.append(mask)
+                point_labels.append(lbl)
+
+    for marker, mask in zip(point_markers, point_masks):
+        colors = np.array(
+            [palette_lookup[c] for c in cluster_labels[mask]], dtype=object
+        )
+        ax.scatter(
+            coords[mask, 0],
+            coords[mask, 1],
+            coords[mask, 2],
+            c=colors,
+            s=marker_size,
+            marker=marker,
+            alpha=alpha,
+            edgecolors="black",
+            linewidths=0.35,
+            depthshade=False,
+        )
+
+    title_fontsize = 11
+    label_fontsize = 9
+    tick_fontsize = 8
+    text_color = "#333333"
+    tick_color = "#444444"
+    grid_alpha = 0.06
+
+    # No title/axis label annotations (slide-friendly; add labels in the slide if desired).
+
+    ax.tick_params(
+        axis="both", which="major", labelsize=tick_fontsize, colors=tick_color
+    )
+    ax.view_init(elev=elev, azim=azim)
+
+    # Clean, slide-friendly styling (match 2D: very light dotted grid)
+    ax.grid(True)
+    grid_rgba = (0.0, 0.0, 0.0, grid_alpha)
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        try:
+            axis._axinfo["grid"].update(
+                {"color": grid_rgba, "linestyle": ":", "linewidth": 0.6}
+            )
+        except Exception:
+            pass
+
+    try:
+        for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+            axis.pane.set_facecolor((1.0, 1.0, 1.0, 0.0))
+            axis.pane.set_edgecolor((0.0, 0.0, 0.0, 0.0))
+    except Exception:
+        # Pane API can vary across Matplotlib versions; ignore if unsupported.
+        pass
+
+    if legend:
+        # Legend: omit cluster-color legend entries (often redundant on slides).
+        # If true labels are provided, keep the marker-shape legend below the plot.
+        handles = legend_true_handles
+        labels = legend_true_labels
+
+        if handles:
+            fig.legend(
+                handles,
+                labels,
+                loc="lower center",
+                ncol=min(6, max(1, len(labels))),
+                frameon=False,
+                fontsize=tick_fontsize,
+                bbox_to_anchor=(0.5, 0.0),
+            )
+            fig.tight_layout(rect=[0.0, 0.12, 1.0, 1.0])
+        else:
+            fig.tight_layout()
+    else:
+        fig.tight_layout()
+
+    if savepath is not None:
+        fig.savefig(savepath, dpi=dpi, bbox_inches="tight")
+
+    if show:
+        plt.show()
+
+    return fig, ax
+
+
+def plot_2d_spectral_embedding(
+    spectral_embedding,
+    true_labels=None,
+    cluster_labels=None,
+    add_jitter=True,
+    title="Spectral Embedding",
+    figsize=(6.2, 4.6),
+):
+    """Render a 2D embedding plot that colors by clusters and (optionally) shapes by true labels."""
+
+    # Keep styling dependency-free (Matplotlib only).
+    plt.rcParams.update(
+        {
+            "axes.facecolor": "white",
+            "figure.facecolor": "white",
+        }
+    )
+
+    embedding = np.asarray(spectral_embedding)
+    if cluster_labels is None:
+        raise ValueError("cluster_labels must be provided to color the embedding.")
+
     cluster_labels = np.asarray(cluster_labels)
     unique_clusters = np.unique(cluster_labels)
 
     label_array = None if true_labels is None else np.asarray(true_labels)
     unique_labels = [] if label_array is None else np.unique(label_array)
 
-    base_palette = sns.color_palette(PRESENTATION_COLORS).as_hex()
+    base_palette = list(PRESENTATION_COLORS)
     repeats = max(1, math.ceil(len(unique_clusters) / len(base_palette)))
     extended_palette = (base_palette * repeats)[: len(unique_clusters)]
     palette_lookup = {
@@ -481,166 +754,6 @@ def plot_3d_spectral_embedding(
     color_array = np.array(
         [palette_lookup[str(lbl)] for lbl in cluster_labels], dtype=object
     )
-    cluster_custom = cluster_labels.astype(str).reshape(-1, 1)
-
-    # scatter3d only supports a limited marker symbol set; stay within the valid list
-    marker_cycle = [
-        "circle",
-        "circle-open",
-        "square",
-        "square-open",
-        "diamond",
-        "diamond-open",
-        "cross",
-        "x",
-    ]
-    marker_lookup = (
-        {}
-        if label_array is None
-        else {
-            str(lbl): marker_cycle[idx % len(marker_cycle)]
-            for idx, lbl in enumerate(unique_labels)
-        }
-    )
-
-    if add_jitter:
-        spans = coords.max(axis=0) - coords.min(axis=0)
-        spans[spans == 0] = 1.0
-        rng = np.random.RandomState(42)
-        coords += rng.normal(0, spans * 0.02, size=coords.shape)
-
-    fig = go.Figure()
-
-    if label_array is None:
-        fig.add_trace(
-            go.Scatter3d(
-                x=coords[:, 0],
-                y=coords[:, 1],
-                z=coords[:, 2],
-                mode="markers",
-                name="Spectral embedding",
-                marker=dict(
-                    size=5,
-                    color=color_array.tolist(),
-                    line=dict(color="rgba(0,0,0,0.5)", width=0.4),
-                    opacity=0.85,
-                ),
-                customdata=cluster_custom,
-                hovertemplate=(
-                    "Cluster label: %{customdata[0]}<br>"
-                    "Eigenvector 1: %{x:.3f}<br>"
-                    "Eigenvector 2: %{y:.3f}<br>"
-                    "Eigenvector 3: %{z:.3f}<extra></extra>"
-                ),
-                showlegend=False,
-            )
-        )
-    else:
-        for idx, lbl in enumerate(unique_labels):
-            mask = label_array == lbl
-            if not np.any(mask):
-                continue
-            fig.add_trace(
-                go.Scatter3d(
-                    x=coords[mask, 0],
-                    y=coords[mask, 1],
-                    z=coords[mask, 2],
-                    mode="markers",
-                    name=f"True label {lbl}",
-                    legendgroup="true_labels",
-                    legendgrouptitle_text="True Label" if idx == 0 else None,
-                    marker=dict(
-                        size=5,
-                        color=color_array[mask].tolist(),
-                        symbol=marker_lookup[str(lbl)],
-                        line=dict(color="rgba(0,0,0,0.5)", width=0.4),
-                        opacity=0.85,
-                    ),
-                    customdata=np.column_stack(
-                        [
-                            cluster_labels[mask].astype(str),
-                            label_array[mask].astype(str),
-                        ]
-                    ),
-                    hovertemplate=(
-                        "Cluster label: %{customdata[0]}<br>"
-                        "True label: %{customdata[1]}<br>"
-                        "Eigenvector 1: %{x:.3f}<br>"
-                        "Eigenvector 2: %{y:.3f}<br>"
-                        "Eigenvector 3: %{z:.3f}<extra></extra>"
-                    ),
-                )
-            )
-
-    for idx, cluster in enumerate(unique_clusters):
-        fig.add_trace(
-            go.Scatter3d(
-                x=[None],
-                y=[None],
-                z=[None],
-                mode="markers",
-                name=f"Cluster {cluster}",
-                legendgroup="clusters",
-                legendgrouptitle_text="Cluster Label" if idx == 0 else None,
-                marker=dict(
-                    size=6,
-                    color=palette_lookup[str(cluster)],
-                    symbol="circle",
-                    line=dict(color="rgba(0,0,0,0.6)", width=0.6),
-                ),
-                visible="legendonly",
-                hoverinfo="skip",
-            )
-        )
-
-    fig.update_layout(
-        title="Spectral Embedding",
-        scene=dict(
-            domain=dict(x=[0.0, 1.0], y=[0.0, 1.0]),
-            xaxis_title="Eigenvector 1",
-            yaxis_title="Eigenvector 2",
-            zaxis_title="Eigenvector 3",
-        ),
-        legend=dict(
-            orientation="v",
-            x=0.99,
-            y=0.99,
-            xanchor="right",
-            yanchor="top",
-            bgcolor="rgba(255,255,255,0.7)",
-            bordercolor="rgba(0,0,0,0.1)",
-            itemsizing="constant",
-        ),
-        margin=dict(l=0, r=0, b=0, t=40),
-    )
-
-    fig.show()
-
-
-def plot_2d_spectral_embedding(
-    spectral_embedding, true_labels=None, cluster_labels=None, add_jitter=True
-):
-    """Render a 2D embedding plot that colors by clusters and (optionally) shapes by true labels."""
-
-    sns.set_theme(style="white", context="talk")
-
-    embedding = np.asarray(spectral_embedding)
-    if cluster_labels is None:
-        raise ValueError("cluster_labels must be provided to color the embedding.")
-
-    cluster_labels = np.asarray(cluster_labels)
-    unique_clusters = np.unique(cluster_labels)
-
-    label_array = None if true_labels is None else np.asarray(true_labels)
-    unique_labels = [] if label_array is None else np.unique(label_array)
-
-    base_palette = sns.color_palette(PRESENTATION_COLORS)
-    repeats = math.ceil(len(unique_clusters) / len(base_palette)) or 1
-    extended_palette = (base_palette * repeats)[: len(unique_clusters)]
-    palette_lookup = {
-        str(lbl): extended_palette[idx] for idx, lbl in enumerate(unique_clusters)
-    }
-    color_array = np.array([palette_lookup[str(lbl)] for lbl in cluster_labels])
 
     marker_cycle = ["o", "s", "^", "D", "P", "X", "v", "<", ">", "h"]
     marker_lookup = (
@@ -662,7 +775,7 @@ def plot_2d_spectral_embedding(
         plot_x += rng.normal(0, x_span * 0.02, size=plot_x.shape)
         plot_y += rng.normal(0, y_span * 0.02, size=plot_y.shape)
 
-    fig, ax = plt.subplots(figsize=(5.5, 4.2))
+    fig, ax = plt.subplots(figsize=figsize)
     if label_array is None:
         ax.scatter(
             plot_x,
@@ -690,67 +803,59 @@ def plot_2d_spectral_embedding(
                 alpha=0.9,
             )
 
-    ax.set_title("Spectral Embedding", pad=10, fontsize=11)
-    ax.set_xlabel("Eigenvector 1", fontsize=9)
-    ax.set_ylabel("Eigenvector 2", fontsize=9)
-    sns.despine(ax=ax, trim=False)
-    ax.grid(True, linestyle=":", alpha=0.3)
-    ax.tick_params(axis="both", labelsize=8)
+    title_fontsize = 11
+    label_fontsize = 9
+    tick_fontsize = 8
+    text_color = "#333333"
+    tick_color = "#444444"
+    grid_alpha = 0.0001
 
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker="o",
-            color="none",
-            markerfacecolor=palette_lookup[str(cluster)],
-            markeredgecolor="black",
-            markersize=6.5,
-        )
-        for cluster in unique_clusters
-    ]
+    # No title/axis label annotations (slide-friendly; add labels in the slide if desired).
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.set_axisbelow(True)
+    ax.grid(
+        True,
+        linestyle=":",
+        linewidth=0.6,
+        color=(0.0, 0.0, 0.0, grid_alpha),
+    )
+    ax.tick_params(axis="both", labelsize=tick_fontsize, colors=tick_color)
 
-    cluster_handles = [
-        Line2D(
-            [0],
-            [0],
-            marker=marker_lookup[str(lbl)],
-            color="black",
-            linestyle="",
-            markerfacecolor="none",
-            markersize=6,
-        )
-        for lbl in unique_labels
-    ]
+    # Legend: omit cluster-color legend entries (often redundant on slides).
+    # If true labels are provided, keep the marker-shape legend below the plot.
+    true_handles = (
+        [
+            Line2D(
+                [0],
+                [0],
+                marker=marker_lookup[str(lbl)],
+                color="black",
+                linestyle="",
+                markerfacecolor="none",
+                markersize=6,
+            )
+            for lbl in unique_labels
+        ]
+        if label_array is not None
+        else []
+    )
 
-    if legend_handles:
-        cluster_legend = ax.legend(
-            handles=legend_handles,
-            labels=[str(cluster) for cluster in unique_clusters],
-            title="Cluster Label",
-            loc="upper left",
-            bbox_to_anchor=(1.01, 1),
+    labels = [str(lbl) for lbl in unique_labels] if label_array is not None else []
+    if true_handles:
+        fig.legend(
+            true_handles,
+            labels,
+            loc="lower center",
+            ncol=min(6, max(1, len(labels))),
             frameon=False,
-            borderpad=0.3,
-            labelspacing=0.4,
+            fontsize=tick_fontsize,
+            bbox_to_anchor=(0.5, 0.0),
         )
-        cluster_legend._legend_box.align = "left"
-        ax.add_artist(cluster_legend)
+        fig.tight_layout(rect=[0.0, 0.12, 1.0, 1.0])
+    else:
+        fig.tight_layout()
 
-    if cluster_handles:
-        true_legend = ax.legend(
-            handles=cluster_handles,
-            labels=[str(lbl) for lbl in unique_labels],
-            title="True Label",
-            loc="upper left",
-            bbox_to_anchor=(1.01, 0.25),
-            frameon=False,
-            borderpad=0.3,
-            labelspacing=0.4,
-        )
-        true_legend._legend_box.align = "left"
-
-    fig.tight_layout(rect=[0, 0, 0.78, 1])
     plt.show()
 
 
